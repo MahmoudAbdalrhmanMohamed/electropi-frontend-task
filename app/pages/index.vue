@@ -175,11 +175,11 @@ onBeforeUnmount(() => {
     <section class="relative overflow-hidden border-b border-slate-200/70">
       <div
         aria-hidden="true"
-        class="absolute top-[-9rem] right-[-8rem] size-80 rounded-full bg-brand-300/20 blur-3xl"
+        class="absolute -top-36 -right-32 size-80 rounded-full bg-brand-300/20 blur-3xl"
       />
       <div
         aria-hidden="true"
-        class="absolute bottom-[-10rem] left-[18%] size-72 rounded-full bg-mint-300/20 blur-3xl"
+        class="absolute -bottom-40 left-[18%] size-72 rounded-full bg-mint-300/20 blur-3xl"
       />
 
       <div
