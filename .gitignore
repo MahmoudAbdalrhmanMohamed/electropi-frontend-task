@@ -1,0 +1,23 @@
+# Nuxt
+.nuxt
+.output
+.data
+
+# Dependencies
+node_modules
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.DS_Store
+.idea
+.vscode
+
+# Test output
+coverage
