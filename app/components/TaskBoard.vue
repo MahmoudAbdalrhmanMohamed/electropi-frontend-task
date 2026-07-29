@@ -2,11 +2,17 @@
 import { computed, ref } from 'vue'
 import type { Task, TaskStatus } from '../types/task'
 
-const props = defineProps<{
-  tasks: Task[]
-  loading: boolean
-  hasActiveFilters: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    tasks: Task[]
+    loading: boolean
+    hasActiveFilters: boolean
+    updatingTaskIds?: string[]
+  }>(),
+  {
+    updatingTaskIds: () => [],
+  },
+)
 
 const emit = defineEmits<{
   create: [status: TaskStatus]
@@ -235,6 +241,7 @@ function resetDragState(): void {
               v-for="task in tasksByStatus[column.status]"
               :key="task.id"
               :task="task"
+              :updating="updatingTaskIds.includes(task.id)"
               @drag-start="handleDragStart"
               @drag-end="resetDragState"
               @edit="$emit('edit', $event)"

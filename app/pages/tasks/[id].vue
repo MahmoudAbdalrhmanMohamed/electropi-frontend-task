@@ -1,30 +1,34 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
-import { storeToRefs } from 'pinia'
+import { computed, ref } from 'vue'
 import type { TaskDraft, TaskStatus } from '../../types/task'
-import { useTasksStore } from '../../stores/tasks'
 import { formatDueDate, formatTimestamp, getDueDateMeta, getStatusLabel } from '../../utils/task'
 
 const route = useRoute()
-const tasksStore = useTasksStore()
-const { error, isLoading, mutationError } = storeToRefs(tasksStore)
-
-const isFormOpen = ref(false)
-const isDeleteDialogOpen = ref(false)
-const isSaving = ref(false)
-const isDeleting = ref(false)
-const toastMessage = ref('')
-const toastTone = ref<'success' | 'error'>('success')
-let toastTimer: ReturnType<typeof setTimeout> | undefined
 
 const taskId = computed(() => {
   const routeId = route.params.id
   return Array.isArray(routeId) ? (routeId[0] ?? '') : (routeId ?? '')
 })
+const {
+  isSaving,
+  isDeleting,
+  toastMessage,
+  toastTone,
+  dismissToast,
+  saveTask: persistTask,
+  deleteTask: removeTask,
+} = useTaskMutations()
+const {
+  task,
+  pending: isLoading,
+  errorMessage,
+  isNotFound,
+  refreshTask,
+} = await useTaskData(taskId)
 
-const task = computed(() => tasksStore.getTaskById(taskId.value))
+const isFormOpen = ref(false)
+const isDeleteDialogOpen = ref(false)
 const dueDateMeta = computed(() => (task.value ? getDueDateMeta(task.value.dueDate) : null))
-const showLoadingState = computed(() => isLoading.value)
 const requestUrl = useRequestURL()
 const canonicalUrl = computed(() =>
   new URL(`/tasks/${encodeURIComponent(taskId.value)}`, requestUrl.origin).toString(),
@@ -77,34 +81,13 @@ useHead(() => ({
   ],
 }))
 
-async function loadTask(force = false): Promise<void> {
-  await tasksStore.fetchTask(taskId.value, { force })
-}
-
-function showToast(message: string, tone: 'success' | 'error' = 'success'): void {
-  toastMessage.value = message
-  toastTone.value = tone
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    toastMessage.value = ''
-  }, 3_500)
-}
-
 async function saveTask(draft: TaskDraft): Promise<void> {
   if (!task.value) {
     return
   }
 
-  isSaving.value = true
-
-  try {
-    await tasksStore.updateTask(task.value.id, draft)
+  if (await persistTask(draft, task.value.id)) {
     isFormOpen.value = false
-    showToast('Task updated successfully.')
-  } catch {
-    showToast(mutationError.value ?? 'The task could not be saved. Please try again.', 'error')
-  } finally {
-    isSaving.value = false
   }
 }
 
@@ -113,32 +96,19 @@ async function deleteTask(): Promise<void> {
     return
   }
 
-  isDeleting.value = true
-
-  try {
-    await tasksStore.deleteTask(task.value.id)
+  if (await removeTask(task.value.id)) {
     isDeleteDialogOpen.value = false
     await navigateTo('/')
-  } catch {
-    showToast(mutationError.value ?? 'The task could not be deleted. Please try again.', 'error')
-  } finally {
-    isDeleting.value = false
   }
 }
 
-await callOnce(`task-data:${taskId.value}`, () => tasksStore.fetchTask(taskId.value))
-
-if (import.meta.server && !task.value && !error.value) {
+if (import.meta.server && isNotFound.value) {
   const event = useRequestEvent()
 
   if (event?.node?.res) {
     event.node.res.statusCode = 404
   }
 }
-
-onBeforeUnmount(() => {
-  clearTimeout(toastTimer)
-})
 </script>
 
 <template>
@@ -162,7 +132,7 @@ onBeforeUnmount(() => {
       Back to all tasks
     </NuxtLink>
 
-    <div v-if="showLoadingState" class="mt-6 animate-pulse space-y-5">
+    <div v-if="isLoading" class="mt-6 animate-pulse space-y-5">
       <div class="h-9 w-3/5 rounded-xl bg-slate-200" />
       <div class="h-5 w-2/5 rounded-lg bg-slate-100" />
       <div class="grid gap-5 pt-4 lg:grid-cols-[1fr_18rem]">
@@ -172,11 +142,11 @@ onBeforeUnmount(() => {
     </div>
 
     <FeedbackAlert
-      v-else-if="error"
+      v-else-if="errorMessage"
       class="mt-6"
       title="Task could not be loaded"
-      :message="error"
-      @retry="loadTask(true)"
+      :message="errorMessage"
+      @retry="refreshTask"
     />
 
     <div
@@ -371,11 +341,6 @@ onBeforeUnmount(() => {
       />
     </template>
 
-    <AppToast
-      v-if="toastMessage"
-      :message="toastMessage"
-      :tone="toastTone"
-      @close="toastMessage = ''"
-    />
+    <AppToast v-if="toastMessage" :message="toastMessage" :tone="toastTone" @close="dismissToast" />
   </div>
 </template>

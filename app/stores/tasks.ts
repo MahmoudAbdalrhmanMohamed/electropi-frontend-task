@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { Task, TaskCounts, TaskDraft, TaskStatus, TaskStatusFilter } from '../types/task'
+import { getApiErrorMessage } from '../utils/api'
 import { normalizeTaskDraft } from '../utils/task'
 
 interface DeleteTaskResponse {
@@ -8,61 +9,11 @@ interface DeleteTaskResponse {
   deleted: true
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function getErrorStatus(error: unknown): number | undefined {
-  if (!isRecord(error)) {
-    return undefined
-  }
-
-  if (typeof error.statusCode === 'number') {
-    return error.statusCode
-  }
-
-  if (typeof error.status === 'number') {
-    return error.status
-  }
-
-  if (isRecord(error.data) && typeof error.data.statusCode === 'number') {
-    return error.data.statusCode
-  }
-
-  return undefined
-}
-
-function getErrorMessage(
-  error: unknown,
-  fallback = 'The request could not be completed. Please try again.',
-): string {
-  if (isRecord(error) && isRecord(error.data)) {
-    const statusMessage = error.data.statusMessage
-    const message = error.data.message
-
-    if (typeof statusMessage === 'string' && statusMessage) {
-      return statusMessage
-    }
-
-    if (typeof message === 'string' && message) {
-      return message
-    }
-  }
-
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-
-  return fallback
-}
-
 export const useTasksStore = defineStore('tasks', () => {
   const tasks = ref<Task[]>([])
-  const isLoading = ref(false)
-  const error = ref<string | null>(null)
   const pendingMutationCount = ref(0)
   const mutationError = ref<string | null>(null)
-  const hasLoaded = ref(false)
+  const hasLoadedList = ref(false)
   const searchQuery = ref('')
   const statusFilter = ref<TaskStatusFilter>('all')
 
@@ -122,55 +73,18 @@ export const useTasksStore = defineStore('tasks', () => {
 
   const isMutating = computed(() => pendingMutationCount.value > 0)
 
-  async function fetchTasks(options: { force?: boolean } = {}): Promise<void> {
-    if (hasLoaded.value && !options.force) {
-      return
-    }
-
-    isLoading.value = true
-    error.value = null
-
-    try {
-      tasks.value = await $fetch<Task[]>('/api/tasks')
-      hasLoaded.value = true
-    } catch (caughtError: unknown) {
-      error.value = getErrorMessage(caughtError, 'We could not load your tasks. Please try again.')
-    } finally {
-      isLoading.value = false
-    }
+  function replaceTasks(nextTasks: Task[]): void {
+    tasks.value = [...nextTasks]
+    hasLoadedList.value = true
   }
 
-  async function fetchTask(id: string, options: { force?: boolean } = {}): Promise<Task | null> {
-    const existingTask = getTaskById(id)
+  function upsertTask(task: Task): void {
+    const taskIndex = tasks.value.findIndex((candidate) => candidate.id === task.id)
 
-    if (!options.force && (existingTask || hasLoaded.value)) {
-      return existingTask ?? null
-    }
-
-    isLoading.value = true
-    error.value = null
-
-    try {
-      const fetchedTask = await $fetch<Task>(`/api/tasks/${encodeURIComponent(id)}`)
-      const taskIndex = tasks.value.findIndex((task) => task.id === id)
-
-      if (taskIndex === -1) {
-        tasks.value.unshift(fetchedTask)
-      } else {
-        tasks.value[taskIndex] = fetchedTask
-      }
-
-      return fetchedTask
-    } catch (caughtError: unknown) {
-      if (getErrorStatus(caughtError) === 404) {
-        return null
-      }
-
-      error.value = getErrorMessage(caughtError, 'We could not load this task. Please try again.')
-
-      return null
-    } finally {
-      isLoading.value = false
+    if (taskIndex === -1) {
+      tasks.value.unshift(task)
+    } else {
+      tasks.value[taskIndex] = task
     }
   }
 
@@ -181,7 +95,7 @@ export const useTasksStore = defineStore('tasks', () => {
     try {
       return await mutation()
     } catch (caughtError: unknown) {
-      mutationError.value = getErrorMessage(caughtError)
+      mutationError.value = getApiErrorMessage(caughtError)
       throw caughtError
     } finally {
       pendingMutationCount.value -= 1
@@ -195,7 +109,7 @@ export const useTasksStore = defineStore('tasks', () => {
         body: normalizeTaskDraft(draft),
       })
 
-      tasks.value.unshift(task)
+      upsertTask(task)
 
       return task
     })
@@ -207,13 +121,7 @@ export const useTasksStore = defineStore('tasks', () => {
         method: 'PUT',
         body: normalizeTaskDraft(draft),
       })
-      const taskIndex = tasks.value.findIndex((task) => task.id === id)
-
-      if (taskIndex === -1) {
-        tasks.value.unshift(updatedTask)
-      } else {
-        tasks.value[taskIndex] = updatedTask
-      }
+      upsertTask(updatedTask)
 
       return updatedTask
     })
@@ -261,19 +169,17 @@ export const useTasksStore = defineStore('tasks', () => {
 
   return {
     tasks,
-    isLoading,
     isMutating,
-    error,
     mutationError,
-    hasLoaded,
+    hasLoadedList,
     searchQuery,
     statusFilter,
     filteredTasks,
     counts,
     completionRate,
     hasActiveFilters,
-    fetchTasks,
-    fetchTask,
+    replaceTasks,
+    upsertTask,
     createTask,
     updateTask,
     changeTaskStatus,

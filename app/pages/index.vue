@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import type { Task, TaskDraft, TaskStatus, TaskViewMode } from '../types/task'
+import type { Task, TaskDraft, TaskStatus } from '../types/task'
 import { useTasksStore } from '../stores/tasks'
-import { getStatusLabel } from '../utils/task'
 
 useHead({
   link: [
@@ -27,41 +26,26 @@ useSeoMeta({
 })
 
 const tasksStore = useTasksStore()
+const { counts, completionRate, filteredTasks, hasActiveFilters, searchQuery, statusFilter } =
+  storeToRefs(tasksStore)
+const { viewMode } = useTaskViewMode()
 const {
-  counts,
-  completionRate,
-  error,
-  filteredTasks,
-  hasActiveFilters,
-  isLoading,
-  mutationError,
-  searchQuery,
-  statusFilter,
-} = storeToRefs(tasksStore)
+  isSaving,
+  isDeleting,
+  pendingStatusTaskIds,
+  toastMessage,
+  toastTone,
+  dismissToast,
+  saveTask: persistTask,
+  deleteTask: removeTask,
+  changeTaskStatus: persistTaskStatus,
+} = useTaskMutations()
+const { pending: isLoading, errorMessage, refreshTasks } = await useTasksData()
 
 const isFormOpen = ref(false)
-const isSaving = ref(false)
-const isDeleting = ref(false)
 const editingTask = ref<Task | null>(null)
 const taskToDelete = ref<Task | null>(null)
 const newTaskStatus = ref<TaskStatus>('pending')
-const viewMode = ref<TaskViewMode>('grid')
-const toastMessage = ref('')
-const toastTone = ref<'success' | 'error'>('success')
-let toastTimer: ReturnType<typeof setTimeout> | undefined
-
-const VIEW_MODE_STORAGE_KEY = 'taskflow:view-mode'
-
-const showLoadingState = computed(() => isLoading.value)
-
-function showToast(message: string, tone: 'success' | 'error' = 'success'): void {
-  toastMessage.value = message
-  toastTone.value = tone
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    toastMessage.value = ''
-  }, 3_500)
-}
 
 function openCreateForm(status: TaskStatus = 'pending'): void {
   editingTask.value = null
@@ -81,22 +65,10 @@ function closeForm(): void {
 }
 
 async function saveTask(draft: TaskDraft): Promise<void> {
-  isSaving.value = true
+  const savedTask = await persistTask(draft, editingTask.value?.id)
 
-  try {
-    if (editingTask.value) {
-      await tasksStore.updateTask(editingTask.value.id, draft)
-      showToast('Task updated successfully.')
-    } else {
-      await tasksStore.createTask(draft)
-      showToast('Task created successfully.')
-    }
-
+  if (savedTask) {
     closeForm()
-  } catch {
-    showToast(mutationError.value ?? 'The task could not be saved. Please try again.', 'error')
-  } finally {
-    isSaving.value = false
   }
 }
 
@@ -111,63 +83,18 @@ async function confirmDelete(): Promise<void> {
     return
   }
 
-  isDeleting.value = true
-
-  try {
-    await tasksStore.deleteTask(selectedTask.id)
+  if (await removeTask(selectedTask.id)) {
     taskToDelete.value = null
-    showToast('Task deleted successfully.')
-  } catch {
-    showToast(mutationError.value ?? 'The task could not be deleted. Please try again.', 'error')
-  } finally {
-    isDeleting.value = false
   }
 }
 
 async function changeTaskStatus(task: Task, status: TaskStatus): Promise<void> {
-  const previousStatus = task.status
-
-  if (previousStatus === status) {
-    return
-  }
-
-  try {
-    const updatedTask = await tasksStore.changeTaskStatus(task.id, status)
-
-    if (updatedTask) {
-      showToast(`Task moved to ${getStatusLabel(status)}.`)
-    }
-  } catch {
-    showToast(
-      mutationError.value ?? 'The task status could not be changed. Please try again.',
-      'error',
-    )
-  }
+  await persistTaskStatus(task, status)
 }
 
-async function loadTasks(force = false): Promise<void> {
-  await tasksStore.fetchTasks({ force })
+async function loadTasks(): Promise<void> {
+  await refreshTasks()
 }
-
-await callOnce('task-data', () => tasksStore.fetchTasks())
-
-onMounted(() => {
-  const savedViewMode = localStorage.getItem(VIEW_MODE_STORAGE_KEY)
-
-  if (savedViewMode === 'grid' || savedViewMode === 'board') {
-    viewMode.value = savedViewMode
-  }
-})
-
-watch(viewMode, (nextViewMode) => {
-  if (import.meta.client) {
-    localStorage.setItem(VIEW_MODE_STORAGE_KEY, nextViewMode)
-  }
-})
-
-onBeforeUnmount(() => {
-  clearTimeout(toastTimer)
-})
 </script>
 
 <template>
@@ -225,17 +152,13 @@ onBeforeUnmount(() => {
     </section>
 
     <div class="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
-      <DashboardStats
-        :counts="counts"
-        :completion-rate="completionRate"
-        :loading="showLoadingState"
-      />
+      <DashboardStats :counts="counts" :completion-rate="completionRate" :loading="isLoading" />
 
       <FeedbackAlert
-        v-if="error"
+        v-if="errorMessage && !isLoading"
         title="Tasks could not be loaded"
-        :message="error"
-        @retry="loadTasks(true)"
+        :message="errorMessage"
+        @retry="loadTasks"
       />
 
       <section v-else id="tasks" class="scroll-mt-24 space-y-4" aria-labelledby="task-list-title">
@@ -265,7 +188,7 @@ onBeforeUnmount(() => {
         <TaskList
           v-if="viewMode === 'grid'"
           :tasks="filteredTasks"
-          :loading="showLoadingState"
+          :loading="isLoading"
           :has-active-filters="hasActiveFilters"
           @create="openCreateForm"
           @clear-filters="tasksStore.clearFilters"
@@ -276,8 +199,9 @@ onBeforeUnmount(() => {
         <TaskBoard
           v-else
           :tasks="filteredTasks"
-          :loading="showLoadingState"
+          :loading="isLoading"
           :has-active-filters="hasActiveFilters"
+          :updating-task-ids="pendingStatusTaskIds"
           @create="openCreateForm"
           @clear-filters="tasksStore.clearFilters"
           @edit="openEditForm"
@@ -304,11 +228,6 @@ onBeforeUnmount(() => {
       @confirm="confirmDelete"
     />
 
-    <AppToast
-      v-if="toastMessage"
-      :message="toastMessage"
-      :tone="toastTone"
-      @close="toastMessage = ''"
-    />
+    <AppToast v-if="toastMessage" :message="toastMessage" :tone="toastTone" @close="dismissToast" />
   </div>
 </template>

@@ -57,15 +57,19 @@ describe('tasks store', () => {
     })
   })
 
-  it('loads a single task through its resource endpoint', async () => {
+  it('replaces the list and upserts individual tasks', () => {
     const store = useTasksStore()
-    const fetchMock = vi.fn().mockResolvedValue(sampleTasks[0])
+    const updatedTask: Task = {
+      ...sampleTasks[0]!,
+      title: 'Updated launch checklist',
+    }
 
-    vi.stubGlobal('$fetch', fetchMock)
+    store.replaceTasks(sampleTasks.slice(0, 2))
+    store.upsertTask(updatedTask)
+    store.upsertTask(sampleTasks[2]!)
 
-    await expect(store.fetchTask('task-one')).resolves.toEqual(sampleTasks[0])
-    expect(store.tasks).toEqual([sampleTasks[0]])
-    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-one')
+    expect(store.hasLoadedList).toBe(true)
+    expect(store.tasks).toEqual([sampleTasks[2], updatedTask, sampleTasks[1]])
   })
 
   it('creates, updates, and deletes tasks through the REST API', async () => {

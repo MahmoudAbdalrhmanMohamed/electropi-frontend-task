@@ -6,6 +6,7 @@ import { formatDueDate, getDueDateMeta } from '../utils/task'
 
 const props = defineProps<{
   task: Task
+  updating?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -30,18 +31,33 @@ const dueDateClass = computed(() => {
 })
 
 function handleStatusChange(event: Event): void {
+  if (props.updating) {
+    return
+  }
+
   emit('statusChange', props.task, (event.target as HTMLSelectElement).value as TaskStatus)
 }
 
 function handleDragStart(event: DragEvent): void {
+  if (props.updating) {
+    event.preventDefault()
+    return
+  }
+
   emit('dragStart', event, props.task)
 }
 </script>
 
 <template>
   <article
-    draggable="true"
-    class="group cursor-grab rounded-xl border border-slate-200 bg-white p-3.5 shadow-[0_3px_10px_rgb(15_23_42/0.06)] transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-[0_8px_20px_rgb(15_23_42/0.1)] active:cursor-grabbing"
+    :draggable="!updating"
+    :aria-busy="updating"
+    :class="
+      updating
+        ? 'cursor-wait opacity-70'
+        : 'cursor-grab hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-[0_8px_20px_rgb(15_23_42/0.1)] active:cursor-grabbing'
+    "
+    class="group rounded-xl border border-slate-200 bg-white p-3.5 shadow-[0_3px_10px_rgb(15_23_42/0.06)] transition"
     @dragstart="handleDragStart"
     @dragend="$emit('dragEnd')"
   >
@@ -65,7 +81,25 @@ function handleDragStart(event: DragEvent): void {
         </p>
       </div>
 
-      <div class="flex shrink-0 items-center">
+      <span
+        v-if="updating"
+        role="status"
+        aria-label="Updating task status"
+        class="grid size-7 shrink-0 place-items-center text-brand-600"
+      >
+        <svg aria-hidden="true" class="size-4 animate-spin" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" />
+          <path
+            class="opacity-90"
+            d="M21 12a9 9 0 0 0-9-9"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-width="3"
+          />
+        </svg>
+      </span>
+
+      <div v-else class="flex shrink-0 items-center">
         <button
           type="button"
           :aria-label="`Edit ${task.title}`"
@@ -135,7 +169,8 @@ function handleDragStart(event: DragEvent): void {
       <select
         :value="task.status"
         :aria-label="`Move ${task.title} to another status`"
-        class="h-7 max-w-30 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-[0.68rem] font-bold text-slate-600 transition hover:border-slate-300 hover:bg-white"
+        :disabled="updating"
+        class="h-7 max-w-30 rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-[0.68rem] font-bold text-slate-600 transition hover:border-slate-300 hover:bg-white disabled:cursor-wait disabled:opacity-60"
         @change="handleStatusChange"
       >
         <option v-for="option in TASK_STATUS_OPTIONS" :key="option.value" :value="option.value">
