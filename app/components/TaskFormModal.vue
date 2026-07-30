@@ -106,7 +106,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to="#teleports">
     <Transition
       enter-active-class="transition duration-200 ease-out"
       enter-from-class="opacity-0"

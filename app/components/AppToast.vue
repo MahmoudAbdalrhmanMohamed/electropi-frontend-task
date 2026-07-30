@@ -15,7 +15,7 @@ defineEmits<{
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to="#teleports">
     <div
       :role="tone === 'error' ? 'alert' : 'status'"
       :aria-live="tone === 'error' ? 'assertive' : 'polite'"

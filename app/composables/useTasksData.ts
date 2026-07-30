@@ -15,7 +15,7 @@ export async function useTasksData() {
       deep: false,
       default: () => [],
       dedupe: 'cancel',
-      lazy: true,
+      lazy: false,
       server: true,
       timeout: 10_000,
     },

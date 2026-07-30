@@ -1,4 +1,6 @@
 <template>
+  <RouteLoader />
+
   <NuxtLayout>
     <NuxtPage />
   </NuxtLayout>
